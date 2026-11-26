@@ -1,0 +1,14 @@
+NewsPilot AI Enterprise Edition licence
+
+Copyright (C) 2026 [COPYRIGHT HOLDER: to be filled in before the first release]. All rights reserved.
+
+The files in this directory (ee/) and its subdirectories are NOT licensed under the GNU Affero General Public
+License. They are proprietary.
+
+You may read them. You may not use, copy, modify, distribute or run them, alone or as part of a service,
+without a separate written commercial agreement with the copyright holder.
+
+The rest of this repository, outside ee/, is licensed under the AGPL-3.0 (see the LICENSE and NOTICE files at the
+repository root). Code outside ee/ must never import from ee/.
+
+This text is a placeholder until a full commercial licence has been drafted and reviewed.
