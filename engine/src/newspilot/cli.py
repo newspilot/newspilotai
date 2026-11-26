@@ -7,6 +7,8 @@
   newspilot secret new-master-key               print a new value for NEWSPILOT_MASTER_KEY
   newspilot secret set SLUG NAME                store a secret; the value is read from standard input
   newspilot secret list SLUG                    list secrets (names, status, fingerprints; never values)
+  newspilot setting list SLUG                   show the site's settings, with their help text
+  newspilot setting set SLUG KEY VALUE          change a setting ("none" clears it back to its default)
 
 Secret values are never accepted as command-line arguments, because those end up in shell history and process
 lists.
@@ -17,8 +19,9 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+import textwrap
 
-from newspilot import config, migrations
+from newspilot import config, migrations, settings, settings_registry
 from newspilot.db import Tenant, make_engine, make_session_factory
 from newspilot.secret_store import LocalKeyProvider, SecretStore, new_master_key
 from newspilot.tenancy import TenantContext, active_tenant_ids, create_tenant, tenant_id_for_slug, tenant_session
@@ -68,6 +71,14 @@ def main(argv: list[str] | None = None) -> int:
     s_list = secret.add_parser("list", help="list a tenant's secrets")
     s_list.add_argument("slug")
 
+    setting = sub.add_parser("setting").add_subparsers(dest="cmd", required=True)
+    g_list = setting.add_parser("list", help="show settings with their help text")
+    g_list.add_argument("slug")
+    g_set = setting.add_parser("set", help="change a setting")
+    g_set.add_argument("slug")
+    g_set.add_argument("key")
+    g_set.add_argument("value")
+
     args = parser.parse_args(argv)
 
     if args.group == "db":
@@ -96,7 +107,49 @@ def main(argv: list[str] | None = None) -> int:
         with tenant_session(sessions, _context(sessions, args.slug)) as session:
             for info in store.list(session):
                 print(f"{info.name}\t{info.status}\t{info.fingerprint}\t{info.updated_at:%Y-%m-%d %H:%M}")
+    elif args.group == "setting" and args.cmd == "list":
+        sessions = _sessions()
+        with tenant_session(sessions, _context(sessions, args.slug)) as session:
+            views = settings.describe(session)
+        print(render_settings(views))
+    elif args.group == "setting" and args.cmd == "set":
+        sessions = _sessions()
+        if settings_registry.definition(args.key) is None:
+            raise SystemExit(f"unknown setting {args.key!r}; see `newspilot setting list {args.slug}`")
+        try:
+            with tenant_session(sessions, _context(sessions, args.slug)) as session:
+                settings.put(session, args.key, args.value)
+                value = settings.get(session, args.key)
+        except settings.InvalidSettingError as e:
+            raise SystemExit(str(e)) from e
+        print(f"{args.key} = {_show(value)}")
     return 0
+
+
+def _show(value) -> str:
+    if value is None or value == {}:
+        return "not set (no limit)"
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in value.items())
+    return str(value)
+
+
+def render_settings(views) -> str:
+    wrap = textwrap.TextWrapper(width=100, initial_indent="    ", subsequent_indent="    ")
+    out = []
+    groups = {}
+    for v in views:
+        groups.setdefault(v.definition.group, []).append(v)
+    for group, items in groups.items():
+        title, intro = settings_registry.GROUPS.get(group, (group, ""))
+        out += [title.upper(), ""]
+        out += [wrap.fill(p) + "\n" for p in intro.split("\n\n") if p]
+        for v in items:
+            out.append(f"  {v.definition.label}  [{v.definition.key}]")
+            out.append(f"    current: {_show(v.value)}")
+            out.append(wrap.fill(v.definition.help))
+            out.append("")
+    return "\n".join(out).rstrip() + "\n"
 
 
 if __name__ == "__main__":

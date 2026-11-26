@@ -27,7 +27,7 @@ from collections.abc import Mapping
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from newspilot import audit
+from newspilot import audit, publish_limits
 from newspilot.db.models import Approval, Article, ArticleRevision, Lead
 from newspilot.publish_mode import effective_mode
 from newspilot.tenancy import HUMAN_ACTOR_PREFIXES, current_context, is_human
@@ -37,7 +37,9 @@ __all__ = ["HUMAN_ACTOR_PREFIXES", "is_human"]  # re-exported for callers of the
 # What an editor confirms before approving. A site can add items; these four cannot be removed.
 REQUIRED_CHECKLIST = ("facts_checked", "quotes_checked", "images_licensed", "sources_credited")
 # What the automated checks must all report before an article may auto-publish. The database requires the same keys.
-AUTO_CHECKS = ("quality_gate", "information_gain", "images_licensed", "sources_credited", "within_caps")
+# Publishing limits are not an approval check: they are optional site settings applied at publish time
+# (newspilot.publish_limits), and an article over a limit waits rather than being held.
+AUTO_CHECKS = ("quality_gate", "information_gain", "images_licensed", "sources_credited")
 
 
 class WorkflowError(RuntimeError):
@@ -46,6 +48,14 @@ class WorkflowError(RuntimeError):
 
 class ApprovalError(WorkflowError):
     """An approval was refused (not a person, stale revision, incomplete checklist)."""
+
+
+class PublishLimitReached(WorkflowError):
+    """A publishing limit the site owner set is reached. The article stays approved and can go out later."""
+
+    def __init__(self, reason: str, retry_after=None) -> None:
+        super().__init__(reason)
+        self.reason, self.retry_after = reason, retry_after
 
 
 def _article(session: Session, article_id: uuid.UUID, *, lock: bool = True) -> Article:
@@ -293,13 +303,31 @@ def reject(session: Session, article_id: uuid.UUID, reason: str, *, changes_requ
     return article
 
 
-def mark_published(session: Session, article_id: uuid.UUID) -> Article:
-    """Record that the approved current revision is now live. Publish adapters call this after a successful publish."""
+def mark_published(session: Session, article_id: uuid.UUID, *, override_limits: bool = False) -> Article:
+    """Record that the approved current revision is now live.
+
+    A publisher should call this in the same transaction as the publish itself, before sending the article to the
+    site, so a refusal (for example PublishLimitReached) means nothing went out. A first publication respects the
+    site's own publishing limits, if it set any. A person may override them (it is recorded); the system may not.
+    """
+    ctx = current_context(session)
+    publish_limits.lock_for_publishing(session)
     article = _article(session, article_id)
     if article.status not in ("approved", "unpublished"):
         raise WorkflowError(f"cannot publish an article that is {article.status}")
     if article.approved_revision_id is None or article.approved_revision_id != article.current_revision_id:
         raise ApprovalError("the current revision has not been approved")
+    limit = publish_limits.check(session, article.id)
+    if not limit.ok:
+        if not (override_limits and is_human(ctx.actor)):
+            raise PublishLimitReached(limit.reason, limit.retry_after)
+        audit.record(
+            session,
+            "article.limit_overridden",
+            target_type="article",
+            target_id=str(article.id),
+            details={"limit": limit.reason},
+        )
     decisions = set(
         session.scalars(select(Approval.decision).where(Approval.revision_id == article.current_revision_id))
     )

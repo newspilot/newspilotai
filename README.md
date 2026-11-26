@@ -19,16 +19,17 @@ These are defaults the code enforces, not options you have to remember to turn o
 - **Auto-publish only by choice, and labelled.** A site can opt in, for the whole site or for chosen categories.
   A person still approves each story idea, every automated check must pass, and readers are told that a person
   did not review the final text.
-- **Fail closed.** If a quality check, a budget meter or a licence check cannot give an answer, the article
-  waits. It is never published "unchecked".
+- **Fail closed.** If a quality check or a licence check cannot give an answer, the article waits. It is never
+  published "unchecked".
 - **Sources, not scraping.** Every claim is traced to a source. The engine respects robots.txt and opt-outs,
   limits how much of any one source it quotes, and treats paywalled sources as links only.
 - **Licensed images only.** Images come only from sources with a machine-checked licence (or that you upload).
   Each one carries stored provenance. Crediting an image is not the same as licensing it.
 - **Real bylines.** Articles name a real person who takes editorial responsibility. There are no synthetic
   personas.
-- **No "publish at scale".** Daily caps, per-source caps and an information-gain check keep output to stories
-  that add something.
+- **No "publish at scale".** An information-gain check holds drafts that add nothing new. Publishing limits
+  (per day, per category, per source, minimum gap) are your own settings, off by default, with guidance on how
+  Google treats scaled content. The engine imposes no limit of its own.
 
 ## How it is organised
 

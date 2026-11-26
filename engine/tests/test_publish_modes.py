@@ -227,7 +227,7 @@ def test_database_auto_approval_rules(sessions, ctxs):
         tenant_session(sessions, ctxs["system"]) as s,
     ):
         _raw_auto_approval(s, ctxs["system"], article_id, approver="user:someone")
-    partial = {k: v for k, v in ALL_PASS.items() if k != "within_caps"}
+    partial = {k: v for k, v in ALL_PASS.items() if k != "sources_credited"}
     with (
         pytest.raises(IntegrityError, match="ck_approvals_auto_checks_passed"),
         tenant_session(sessions, ctxs["system"]) as s,
