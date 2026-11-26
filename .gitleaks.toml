@@ -1,0 +1,17 @@
+title = "NewsPilot AI secret scan"
+
+# Use gitleaks' built-in rules (API keys, tokens, private keys, connection strings, ...).
+[extend]
+useDefault = true
+
+# Add a rule for hard-coded passwords and API keys, which the defaults can miss when they are short.
+[[rules]]
+id = "hardcoded-credential-assignment"
+description = "A password, secret, token or API key assigned as a literal string"
+regex = '''(?i)\b[a-z0-9_]*(?:password|passwd|secret|token|api_key|apikey)\s*[:=]\s*["']([^"'\s$<{]{8,})["']'''
+secretGroup = 1
+keywords = ["password", "passwd", "secret", "token", "api_key", "apikey"]
+
+[allowlist]
+description = "Files that only contain placeholder values"
+paths = ['''(^|/)\.env\.example$''', '''(^|/)LICENSE$''']
