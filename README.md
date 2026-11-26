@@ -52,7 +52,10 @@ pytest
 ```
 
 The database tests need a PostgreSQL superuser URL in `NEWSPILOT_TEST_ADMIN_URL`. Each test run creates and
-drops its own database. Without the variable, those tests are skipped.
+drops its own database and roles. Without the variable, those tests are skipped.
+
+To run the engine locally, see [`docs/database.md`](docs/database.md). It covers the two database roles, the
+master key, and a Docker Compose file for a development database.
 
 ## Licence
 

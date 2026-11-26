@@ -66,7 +66,8 @@ CI runs `scripts/check_neutral.py` to catch subject-specific terms in the core.
 engine/          Python package `newspilot`: domain, pipeline, gates, adapters, storage
   src/newspilot/
   tests/
-docs/            design notes
+docs/            design notes (database.md: roles, environment, first run)
+deploy/dev/      Docker Compose for a local development database
 scripts/         repository checks
 ee/              hosted-service code under a commercial licence (never imported by the core)
 ```
