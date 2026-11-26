@@ -49,6 +49,33 @@ editor; it never publishes it.
 - **Review:** an editor approves the final text with a checklist. Any regeneration resets the approval. The
   approver is stored with the article.
 
+## Approval workflow
+
+```
+draft ──submit──▶ in_review ──approve──▶ approved ──publish──▶ published ──unpublish──▶ unpublished
+  │                   │  ▲                   │                    │
+  └──hold──▶ held ────┘  └──── any new revision resets the approval ┘
+```
+
+- Every change to an article's text is a new **revision**. Revisions are immutable, and each one's
+  `content_hash` is computed by the database from its text.
+- An **approval** is a person's sign-off on one exact revision. It records the approver, the time, the content
+  hash and a checklist (facts, quotes, images, sources). Approvals are immutable.
+- A **new revision cancels the approval.** A live article that is edited stays live with its approved text
+  until the new revision is approved.
+- An editor can **unpublish** at any time.
+
+The database enforces the rules that matter most, so application code cannot get around them:
+
+| Rule | Enforced by |
+|---|---|
+| Only a person approves (`user:` or `cli:` actors, never `system:`) | `CHECK` constraint on `approvals` |
+| An approval matches its revision's exact text | trigger on `approvals` |
+| Only a revision with a matching approval can be published | trigger on `articles` |
+| "Approved" always refers to the current revision | `CHECK` constraint on `articles` |
+| An article points only at its own revisions, in its own tenant | composite foreign keys |
+| Revisions and approvals are never changed or deleted | grants, plus triggers that also stop the owner |
+
 ## Subject-neutral core, configurable sites
 
 The core never contains anything specific to one subject, site or market. All of that is configuration:

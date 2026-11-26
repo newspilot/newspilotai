@@ -2,9 +2,24 @@
 """Storage: models, engine and session helpers. Tenancy rules live in newspilot.tenancy."""
 
 from newspilot.db.engine import make_engine, make_session_factory
-from newspilot.db.models import AuditEntry, Base, Tenant, TenantKey, TenantSecret, TenantSetting
+from newspilot.db.models import (
+    Approval,
+    Article,
+    ArticleRevision,
+    AuditEntry,
+    Base,
+    Lead,
+    Tenant,
+    TenantKey,
+    TenantSecret,
+    TenantSetting,
+)
 
 __all__ = [
+    "Approval",
+    "Article",
+    "ArticleRevision",
+    "Lead",
     "AuditEntry",
     "Base",
     "Tenant",
