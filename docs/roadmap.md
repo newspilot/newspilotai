@@ -19,13 +19,20 @@ article, and healthy search indexing with no manual actions.
 
 ## Phase 1: first public release
 
-Docker Compose and one-click templates, documentation, published evaluation results, and the CLA process
-opened to outside contributors.
+- **Python package** on PyPI (`pipx install newspilot`, `uv tool install newspilot`), published from GitHub
+  Actions with trusted publishing (no stored tokens)
+- **Docker image** on GitHub Container Registry, multi-architecture, with signed build provenance and an SBOM
+- **Docker Compose** bundle: engine and PostgreSQL in one command
+- **One-click templates:** Coolify first, then Railway, Render and DigitalOcean
+- **Dev container** for GitHub Codespaces
+- Versioned releases with a changelog; documentation; published evaluation results; the CLA process opened to
+  outside contributors
 
 ## Phase 2 onwards
 
-More publish adapters (WordPress, Ghost, Webflow), bring-your-own keys checked on save, newsletter and social
-repackaging, hosted themes and custom domains, and plugins for structured story templates.
+More publish adapters (WordPress, Ghost, Webflow) and a **WordPress connector plugin** on wordpress.org; a
+content API with **SDKs** (Python on PyPI, TypeScript on npm); bring-your-own keys checked on save; newsletter and
+social repackaging; and plugins for structured story templates. A Helm chart if there is demand.
 
 ## Never
 

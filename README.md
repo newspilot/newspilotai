@@ -30,6 +30,20 @@ These are defaults the code enforces, not options you have to remember to turn o
 - **No "publish at scale".** Daily caps, per-source caps and an information-gain check keep output to stories
   that add something.
 
+## Install
+
+NewsPilot AI is pre-alpha, so for now you run it **from source**:
+
+```bash
+git clone https://github.com/newspilot/newspilotai.git
+cd newspilotai/engine && python -m venv .venv && . .venv/bin/activate && pip install -e .
+newspilot --help
+```
+
+Then follow [`docs/install.md`](docs/install.md) to set up the database and your first site. A Python package
+(`pipx install newspilot`), a Docker image, a Docker Compose bundle and one-click deploy templates are planned
+for the first release. The full list, with the status of each, is in [`docs/install.md`](docs/install.md).
+
 ## How it is organised
 
 | Path | What |
