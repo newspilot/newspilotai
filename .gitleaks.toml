@@ -8,7 +8,7 @@ useDefault = true
 [[rules]]
 id = "hardcoded-credential-assignment"
 description = "A password, secret, token or API key assigned as a literal string"
-regex = '''(?i)\b[a-z0-9_]*(?:password|passwd|secret|token|api_key|apikey)\s*[:=]\s*["']([^"'\s$<{]{8,})["']'''
+regex = '''(?i)\b[a-z0-9_]*(?:password|passwd|secret|token|api_key|apikey)["']?\s*(?:=|:\s)\s*["']([^"'\s$<{]{8,})["']'''
 secretGroup = 1
 keywords = ["password", "passwd", "secret", "token", "api_key", "apikey"]
 
