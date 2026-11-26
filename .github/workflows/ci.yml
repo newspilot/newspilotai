@@ -18,8 +18,10 @@ jobs:
           fetch-depth: 0   # scan every commit, not just the latest
       - name: gitleaks
         run: |
+          # Scan the full history of the commit under test only, not every branch in the repository, so an
+          # unmerged branch can never fail main (and main's rules are applied to main's own history).
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.21.2 \
-            git /repo --config /repo/.gitleaks.toml --redact --verbose
+            git /repo --config /repo/.gitleaks.toml --redact --verbose --log-opts="--full-history HEAD"
 
   neutral:
     name: Core stays subject-neutral
