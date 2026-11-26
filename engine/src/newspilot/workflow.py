@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The article lifecycle and the human-approval gate.
+"""The article lifecycle and the approval gate.
 
-    draft ──submit──▶ in_review ──approve──▶ approved ──publish──▶ published ──unpublish──▶ unpublished
-      │                   │  ▲                   │                    │
-      └──hold──▶ held ────┘  └──── any new revision resets the approval ┘
+    draft ──submit──▶ in_review ──approve / auto_approve──▶ approved ──publish──▶ published ──unpublish──▶ unpublished
+      │                   │  ▲                                  │                    │
+      └──hold──▶ held ────┘  └────────── any new revision resets the approval ───────┘
+
+Two publishing modes (see newspilot.publish_mode), set per site and optionally per category:
+- "human" (default): approve() — a person approves the exact final text, with a checklist.
+- "auto": auto_approve() — the system approves once a person has approved the lead and every automated check has
+  passed. If anything is missing or failed, the article is held for a person instead. Auto-published articles are
+  marked "not_human_reviewed" so readers can be told.
 
 Rules (the database enforces the most important ones as well, see migration 0002):
 - Every change to the text is a new, immutable revision. A new revision cancels any approval: the article goes
   back to in_review and must be approved again.
-- Only a person can approve ("user:" or "cli:" actors). The approval is for one exact revision, identified by its
-  content hash, and every item on the checklist must be confirmed.
+- An approval is for one exact revision, identified by its content hash.
 - Only an approved revision can be published, and only while it is still the current revision.
 - An editor can unpublish at any time.
 """
@@ -23,12 +28,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from newspilot import audit
-from newspilot.db.models import Approval, Article, ArticleRevision
-from newspilot.tenancy import current_context
+from newspilot.db.models import Approval, Article, ArticleRevision, Lead
+from newspilot.publish_mode import effective_mode
+from newspilot.tenancy import HUMAN_ACTOR_PREFIXES, current_context, is_human
+
+__all__ = ["HUMAN_ACTOR_PREFIXES", "is_human"]  # re-exported for callers of the workflow
 
 # What an editor confirms before approving. A site can add items; these four cannot be removed.
 REQUIRED_CHECKLIST = ("facts_checked", "quotes_checked", "images_licensed", "sources_credited")
-HUMAN_ACTOR_PREFIXES = ("user:", "cli:")
+# What the automated checks must all report before an article may auto-publish. The database requires the same keys.
+AUTO_CHECKS = ("quality_gate", "information_gain", "images_licensed", "sources_credited", "within_caps")
 
 
 class WorkflowError(RuntimeError):
@@ -37,10 +46,6 @@ class WorkflowError(RuntimeError):
 
 class ApprovalError(WorkflowError):
     """An approval was refused (not a person, stale revision, incomplete checklist)."""
-
-
-def is_human(actor: str) -> bool:
-    return actor.startswith(HUMAN_ACTOR_PREFIXES) and len(actor.split(":", 1)[1].strip()) > 0
 
 
 def _article(session: Session, article_id: uuid.UUID, *, lock: bool = True) -> Article:
@@ -66,10 +71,13 @@ def create_article(
     standfirst: str | None = None,
     origin: str = "draft",
     lead_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
 ) -> Article:
-    """A new article with its first revision, in status draft."""
+    """A new article with its first revision, in status draft. It takes its lead's category unless given one."""
     ctx = current_context(session)
-    article = Article(tenant_id=ctx.tenant_id, lead_id=lead_id, status="draft")
+    if category_id is None and lead_id is not None:
+        category_id = session.scalar(select(Lead.category_id).where(Lead.id == lead_id))
+    article = Article(tenant_id=ctx.tenant_id, lead_id=lead_id, category_id=category_id, status="draft")
     session.add(article)
     session.flush()
     _add_revision(session, article, title=title, standfirst=standfirst, body_html=body_html, origin=origin)
@@ -206,6 +214,55 @@ def approve(
     return approval
 
 
+def auto_approve(session: Session, article_id: uuid.UUID, checks: Mapping[str, bool]) -> Approval | None:
+    """The system approves an article in "auto" mode, if it may. Returns None when a person has to decide.
+
+    - In "human" mode nothing happens: the article stays in review for a person.
+    - In "auto" mode, if the lead was not approved by a person, or any automated check did not pass (or did not
+      report), the article is held with the reason, for a person to look at. It fails closed.
+    """
+    ctx = current_context(session)
+    if is_human(ctx.actor):
+        raise ApprovalError("a person approving an article should use approve(), which records their checklist")
+    article = _article(session, article_id)
+    if article.status != "in_review":
+        raise ApprovalError(f"only an article in review can be approved (this one is {article.status})")
+    if effective_mode(session, article.category_id) != "auto":
+        return None
+    lead = session.get(Lead, article.lead_id) if article.lead_id else None
+    if lead is None or not (lead.approved_by and is_human(lead.approved_by)):
+        hold(session, article_id, "auto-publish needs a person to approve the lead first")
+        return None
+    failed = [name for name in AUTO_CHECKS if checks.get(name) is not True]
+    if failed:
+        hold(session, article_id, f"automated checks did not pass: {', '.join(failed)}")
+        return None
+
+    rev = session.get(ArticleRevision, article.current_revision_id)
+    approval = Approval(
+        tenant_id=ctx.tenant_id,
+        article_id=article.id,
+        revision_id=rev.id,
+        content_hash=rev.content_hash,
+        decision="auto_approved",
+        approver=ctx.actor,
+        checklist=dict(checks),
+        note=f"lead approved by {lead.approved_by}",
+    )
+    session.add(approval)
+    article.status, article.approved_revision_id = "approved", rev.id
+    _touch(article)
+    session.flush()
+    audit.record(
+        session,
+        "article.auto_approved",
+        target_type="article",
+        target_id=str(article.id),
+        details={"revision": rev.number, "content_hash": rev.content_hash, "lead_approved_by": lead.approved_by},
+    )
+    return approval
+
+
 def reject(session: Session, article_id: uuid.UUID, reason: str, *, changes_requested: bool = False) -> Article:
     """Turn an article down, or (changes_requested=True) send it back for another revision."""
     ctx = current_context(session)
@@ -243,6 +300,11 @@ def mark_published(session: Session, article_id: uuid.UUID) -> Article:
         raise WorkflowError(f"cannot publish an article that is {article.status}")
     if article.approved_revision_id is None or article.approved_revision_id != article.current_revision_id:
         raise ApprovalError("the current revision has not been approved")
+    decisions = set(
+        session.scalars(select(Approval.decision).where(Approval.revision_id == article.current_revision_id))
+    )
+    # What readers are told depends on how this exact text was approved. A person's approval wins.
+    article.disclosure = "human_reviewed" if "approved" in decisions else "not_human_reviewed"
     article.status = "published"
     article.published_revision_id = article.current_revision_id
     article.first_published_at = article.first_published_at or func.now()
@@ -254,7 +316,7 @@ def mark_published(session: Session, article_id: uuid.UUID) -> Article:
         "article.published",
         target_type="article",
         target_id=str(article.id),
-        details={"revision_id": str(article.published_revision_id)},
+        details={"revision_id": str(article.published_revision_id), "disclosure": article.disclosure},
     )
     return article
 

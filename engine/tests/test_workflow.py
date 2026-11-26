@@ -17,6 +17,9 @@ from newspilot.workflow import ApprovalError, WorkflowError
 
 pytestmark = pytest.mark.usefixtures("database")
 
+PUBLISH_SQL = (
+    "UPDATE articles SET status = 'published', published_revision_id = :r, disclosure = 'human_reviewed' WHERE id = :a"
+)
 CHECKS = {"facts_checked": True, "quotes_checked": True, "images_licensed": True, "sources_credited": True}
 
 
@@ -141,9 +144,9 @@ def test_editing_a_live_article_needs_a_new_approval(sessions, machine, editor):
 
 def test_database_refuses_publishing_without_approval(sessions, machine):
     article_id, rev_id = _draft(sessions, machine)
-    with pytest.raises(DBAPIError, match="no human approval"), tenant_session(sessions, machine) as s:
+    with pytest.raises(DBAPIError, match="no valid approval"), tenant_session(sessions, machine) as s:
         s.execute(
-            text("UPDATE articles SET status = 'published', published_revision_id = :r WHERE id = :a"),
+            text(PUBLISH_SQL),
             {"r": rev_id, "a": article_id},
         )
 
@@ -154,9 +157,9 @@ def test_database_refuses_publishing_a_different_revision_than_approved(sessions
         rev2 = workflow.add_revision(s, article_id, title="A headline", body_html="<p>v2</p>", origin="humanize").id
     with tenant_session(sessions, editor) as s:
         workflow.approve(s, article_id, rev2, CHECKS)
-    with pytest.raises(DBAPIError, match="no human approval"), tenant_session(sessions, machine) as s:
+    with pytest.raises(DBAPIError, match="no valid approval"), tenant_session(sessions, machine) as s:
         s.execute(
-            text("UPDATE articles SET status = 'published', published_revision_id = :r WHERE id = :a"),
+            text(PUBLISH_SQL),
             {"r": rev1, "a": article_id},
         )
 

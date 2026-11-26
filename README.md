@@ -14,8 +14,11 @@ configuration, not from code.
 
 These are defaults the code enforces, not options you have to remember to turn on:
 
-- **Human approval of the final text.** The approver, the time and a checklist are recorded on the article. Any
-  regeneration resets the approval. There is no auto-publish by default.
+- **Human approval by default.** A person approves the final text, and the approver, the time and a checklist
+  are recorded. Any regeneration resets the approval.
+- **Auto-publish only by choice, and labelled.** A site can opt in, for the whole site or for chosen categories.
+  A person still approves each story idea, every automated check must pass, and readers are told that a person
+  did not review the final text.
 - **Fail closed.** If a quality check, a budget meter or a licence check cannot give an answer, the article
   waits. It is never published "unchecked".
 - **Sources, not scraping.** Every claim is traced to a source. The engine respects robots.txt and opt-outs,

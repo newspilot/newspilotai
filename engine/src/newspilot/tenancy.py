@@ -21,6 +21,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 SETTING = "newspilot.tenant_id"
 
+# Actors are written "<kind>:<id>". People are "user:..." (dashboard, Slack) or "cli:..." (an operator at a terminal);
+# processes are "system:...". Only people may approve content or change how it is published.
+HUMAN_ACTOR_PREFIXES = ("user:", "cli:")
+
+
+def is_human(actor: str) -> bool:
+    return actor.startswith(HUMAN_ACTOR_PREFIXES) and len(actor.split(":", 1)[1].strip()) > 0
+
 
 @dataclass(frozen=True)
 class TenantContext:

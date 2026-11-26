@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from newspilot import audit
 from newspilot.db.models import LEAD_STATUSES, Lead
-from newspilot.tenancy import current_context
+from newspilot.tenancy import current_context, is_human
 
 TRACKING_PARAMS = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igshid", "ref", "ref_src", "cmpid"}
 
@@ -65,13 +65,47 @@ def get_or_create(
     return lead, new_id is not None
 
 
-def set_status(session: Session, lead_id, status: str) -> Lead:
-    if status not in LEAD_STATUSES:
-        raise ValueError(f"unknown lead status {status!r}")
+def _lead(session: Session, lead_id) -> Lead:
     current_context(session)
     lead = session.scalars(select(Lead).where(Lead.id == lead_id).with_for_update()).first()
     if lead is None:
         raise LookupError(f"lead {lead_id} not found")
+    return lead
+
+
+def approve(session: Session, lead_id, category_id=None) -> Lead:
+    """A person approves the story idea (for example with a Slack button), optionally choosing its category.
+
+    In "auto" publishing mode this is the human step: the article can then publish once every automated check
+    passes. In "human" mode a person still approves the final text as well.
+    """
+    actor = current_context(session).actor
+    if not is_human(actor):
+        raise PermissionError(f"{actor!r} is not a person; only a person can approve a lead")
+    lead = _lead(session, lead_id)
+    if lead.status not in ("new", "shortlisted"):
+        raise ValueError(f"cannot approve a lead that is {lead.status}")
+    lead.status, lead.approved_by, lead.approved_at, lead.updated_at = "approved", actor, func.now(), func.now()
+    if category_id is not None:
+        lead.category_id = category_id
+    session.flush()
+    audit.record(
+        session,
+        "lead.approved",
+        target_type="lead",
+        target_id=str(lead.id),
+        details={"category_id": str(category_id) if category_id else None},
+    )
+    return lead
+
+
+def set_status(session: Session, lead_id, status: str) -> Lead:
+    """Move a lead along the pipeline. Approving goes through approve(), which records the person."""
+    if status not in LEAD_STATUSES:
+        raise ValueError(f"unknown lead status {status!r}")
+    if status == "approved":
+        raise ValueError("use leads.approve() to approve a lead")
+    lead = _lead(session, lead_id)
     lead.status, lead.updated_at = status, func.now()
     session.flush()
     audit.record(session, "lead.status", target_type="lead", target_id=str(lead.id), details={"status": status})

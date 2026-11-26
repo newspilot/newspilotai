@@ -52,28 +52,52 @@ editor; it never publishes it.
 ## Approval workflow
 
 ```
-draft ──submit──▶ in_review ──approve──▶ approved ──publish──▶ published ──unpublish──▶ unpublished
-  │                   │  ▲                   │                    │
-  └──hold──▶ held ────┘  └──── any new revision resets the approval ┘
+draft ──submit──▶ in_review ──approve / auto_approve──▶ approved ──publish──▶ published ──unpublish──▶ unpublished
+  │                   │  ▲                                  │                    │
+  └──hold──▶ held ────┘  └────────── any new revision resets the approval ───────┘
 ```
 
 - Every change to an article's text is a new **revision**. Revisions are immutable, and each one's
   `content_hash` is computed by the database from its text.
-- An **approval** is a person's sign-off on one exact revision. It records the approver, the time, the content
-  hash and a checklist (facts, quotes, images, sources). Approvals are immutable.
+- An **approval** is a decision on one exact revision. It records who decided, when, the content hash and a
+  checklist. Approvals are immutable, and the latest decision on a revision is the one that counts.
 - A **new revision cancels the approval.** A live article that is edited stays live with its approved text
   until the new revision is approved.
 - An editor can **unpublish** at any time.
 
-The database enforces the rules that matter most, so application code cannot get around them:
+### Publishing modes
+
+Who signs off the final text is set per site, and each of the client's own categories can override it:
+
+| Mode | Final text approved by | Requirements | Readers are told |
+|---|---|---|---|
+| `human` (**default** for every new site) | a person, with a checklist (facts, quotes, images, sources) | none | `human_reviewed` |
+| `auto` (opt-in) | the system | a person approved the **lead** (for example with a Slack button), and **every automated check passed** (quality gate, information gain, image licences, source credits, caps) | `not_human_reviewed` |
+
+- A category can be `human`, `auto`, or follow the site. A routine category can auto-publish while others still
+  need an editor.
+- In `auto` mode, anything missing or failed **holds** the article for a person, with the reason. It never
+  publishes on a guess.
+- Only a person can switch a site or a category to `auto`, and every change is in the audit log.
+- Switching back to `human` stops any auto-approved article that has not yet been published.
+- Auto-published articles carry the `not_human_reviewed` disclosure. Under the EU AI Act (Article 50), AI text
+  published to inform the public must be labelled unless a person reviewed it, and approving the lead is not a
+  review of the final text.
+
+### What the database enforces
+
+These rules hold even if application code is wrong or bypassed:
 
 | Rule | Enforced by |
 |---|---|
-| Only a person approves (`user:` or `cli:` actors, never `system:`) | `CHECK` constraint on `approvals` |
+| `approved` decisions come only from people (`user:` or `cli:`) | `CHECK` on `approvals` |
+| `auto_approved` decisions come only from the system and record that every check passed | `CHECK` on `approvals` |
+| An auto approval needs `auto` mode and a lead approved by a person | trigger on `approvals` |
 | An approval matches its revision's exact text | trigger on `approvals` |
-| Only a revision with a matching approval can be published | trigger on `articles` |
-| "Approved" always refers to the current revision | `CHECK` constraint on `articles` |
-| An article points only at its own revisions, in its own tenant | composite foreign keys |
+| Publishing needs a valid approval of exactly that revision, and a true label (`human_reviewed` only with a person's approval); this is checked again whenever a live article's label changes | trigger on `articles` |
+| "Approved" always refers to the current revision | `CHECK` on `articles` |
+| Only a person switches a site or category to `auto`, or approves a lead | `CHECK`s on `tenants`, `categories`, `leads` |
+| An article points only at its own revisions and categories, in its own tenant | composite foreign keys |
 | Revisions and approvals are never changed or deleted | grants, plus triggers that also stop the owner |
 
 ## Subject-neutral core, configurable sites
