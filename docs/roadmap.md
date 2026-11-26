@@ -6,7 +6,7 @@ Each phase ends with an evidence gate: the next phase starts only once the previ
 
 - Repository foundations: licence, CI, secret scanning, the subject-neutrality check
 - Tenancy core: schema, row-level security, `TenantContext`, encrypted secrets, append-only audit log
-- Pipeline tables and the approval state machine
+- Pipeline tables and the approval state machine, with "human" (default) and opt-in "auto" publishing modes
 - Budget ledger (fails closed), model routing and an allowlist of tested models
 - Pipeline steps: scout, score, research, draft, quality gate, information-gain hold
 - Licensed-image pipeline with stored provenance
@@ -29,6 +29,6 @@ repackaging, hosted themes and custom domains, and plugins for structured story 
 
 ## Never
 
-"Unlimited articles"; auto-publish by default; synthetic or fake bylines; photorealistic AI images of real
+"Unlimited articles"; auto-publish by default (it is opt-in, per site or category, and labelled); synthetic or fake bylines; photorealistic AI images of real
 people or events; fetching content past paywalls; the same story pushed across several sites owned by one
 client.

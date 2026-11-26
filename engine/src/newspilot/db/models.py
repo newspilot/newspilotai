@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -61,6 +62,10 @@ class Tenant(Base):
     # The publisher that takes editorial responsibility (shown on articles and the AI-use policy page).
     publisher_name: Mapped[str | None] = mapped_column(Text)
     publisher_contact: Mapped[str | None] = mapped_column(Text)
+    # "human" (default): a person approves every final text. "auto": see workflow.auto_approve. Set in migration 0002.
+    publish_mode: Mapped[str] = mapped_column(String(8), nullable=False, server_default="human")
+    publish_mode_set_by: Mapped[str | None] = mapped_column(Text)
+    publish_mode_set_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[dt.datetime] = _now()
     updated_at: Mapped[dt.datetime] = _now()
 
@@ -137,3 +142,115 @@ class AuditEntry(Base):
     target_type: Mapped[str | None] = mapped_column(String(100))
     target_id: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+
+
+# ── Content and approval (migration 0002) ─────────────────────────────────────────────────────────────────────────
+#
+# A lead is a story found in a source. An article goes through revisions; each revision is immutable. An approval
+# is a person's sign-off on one exact revision (by content hash). The database refuses to publish a revision that
+# has no matching human approval, whatever the application code does.
+
+LEAD_STATUSES = ("new", "shortlisted", "approved", "drafting", "drafted", "rejected", "expired")
+PUBLISH_MODES = ("human", "auto")
+DISCLOSURES = ("pending", "human_reviewed", "not_human_reviewed")
+ARTICLE_STATUSES = ("draft", "held", "in_review", "approved", "rejected", "published", "unpublished")
+REVISION_ORIGINS = ("draft", "humanize", "quality_fix", "regenerate", "human_edit", "import")
+DECISIONS = ("approved", "auto_approved", "rejected", "changes_requested")
+
+
+class Category(Base):
+    """One of the client's own categories (from their CMS). publish_mode None means: follow the site's mode."""
+
+    __tablename__ = "categories"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    publish_mode: Mapped[str | None] = mapped_column(String(8))
+    publish_mode_set_by: Mapped[str | None] = mapped_column(Text)
+    publish_mode_set_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    active: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    created_at: Mapped[dt.datetime] = _now()
+    updated_at: Mapped[dt.datetime] = _now()
+
+
+class Lead(Base):
+    __tablename__ = "leads"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # sha256 of the normalised source URL: the idempotency key (one lead per source item per tenant).
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[float | None] = mapped_column()
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="new")
+    # Who approved the story idea (for example in Slack). Always a person.
+    approved_by: Mapped[str | None] = mapped_column(Text)
+    approved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = _now()
+    updated_at: Mapped[dt.datetime] = _now()
+
+
+class Article(Base):
+    __tablename__ = "articles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="draft")
+    current_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    approved_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    published_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    hold_reason: Mapped[str | None] = mapped_column(Text)
+    # What readers are told: "human_reviewed" or "not_human_reviewed" (auto-published); "pending" until approval.
+    disclosure: Mapped[str] = mapped_column(String(24), nullable=False, server_default="pending")
+    created_at: Mapped[dt.datetime] = _now()
+    updated_at: Mapped[dt.datetime] = _now()
+    first_published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    last_published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ArticleRevision(Base):
+    """One version of an article's text. Never updated or deleted."""
+
+    __tablename__ = "article_revisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    article_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    standfirst: Mapped[str | None] = mapped_column(Text)
+    body_html: Mapped[str] = mapped_column(Text, nullable=False)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_by: Mapped[str] = mapped_column(Text, nullable=False)
+    # Computed by the database from title, standfirst and body (see newspilot_content_hash).
+    content_hash: Mapped[str] = mapped_column(
+        String(64), Computed("newspilot_content_hash(title, standfirst, body_html)", persisted=True)
+    )
+    created_at: Mapped[dt.datetime] = _now()
+
+    __mapper_args__ = {"eager_defaults": True}
+
+
+class Approval(Base):
+    """A person's decision on one exact revision. Never updated or deleted."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    article_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    approver: Mapped[str] = mapped_column(Text, nullable=False)
+    checklist: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[dt.datetime] = _now()
