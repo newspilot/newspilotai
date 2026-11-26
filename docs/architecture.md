@@ -14,7 +14,8 @@ cannot drift apart.
 | Secrets | `tenant_secrets`, envelope-encrypted: a per-tenant data key wrapped by a master key | A database dump alone never exposes customer keys. |
 | Jobs | A Postgres-backed queue (Procrastinate first). Each article is a workflow keyed by `(tenant_id, source_item_hash)`. | Idempotent and retriable, with no extra infrastructure for self-hosters |
 | Cache | Redis, optional, for caches only | Nothing in Redis is a source of truth. |
-| LLM and search | OpenRouter, plus search providers. A per-tenant budget is reserved before each call and **fails closed**. | Cost caps that cannot be bypassed by a missing meter |
+| LLM and search | OpenRouter, plus search providers. Usage and cost are recorded per article; the engine sets no spending cap. | A measured cost per article, without blocking work |
+| Publishing limits | Optional site settings (per day, per category, per source outlet, minimum gap), off by default | The owner decides the pace, with help text on Google's scaled-content policy |
 | Publishing | Adapters behind one interface: `create_or_update`, `delete`, `health_check` | WordPress, Ghost, Webflow, headless CMSs, webhooks and the content API |
 | Approval | A state machine in the engine. The dashboard is the main review surface; Slack and email notify. | Approval cannot depend on one chat tool. |
 
@@ -41,8 +42,9 @@ editor; it never publishes it.
 - **Research:** at least two independent sources, or one source plus first-party data.
 - **Quality gate:** a fact check against the source pack by a different model family from the writer, plus
   deterministic checks (length, banned phrases, attribution).
-- **Originality:** an information-gain hold, similarity limits against each source, a cap on quote length, and
-  caps per source outlet per day.
+- **Originality:** an information-gain hold, similarity limits against each source, and a cap on quote length.
+- **Pace (optional):** publishing limits from the site's settings. Over a limit, an approved article waits; it is
+  not held. A person may override, and the override is recorded. Corrections to live articles are never delayed.
 - **Images:** licensed sources only, with provenance stored (source, licence, licence URL, author, page, time of
   check). AI illustrations are labelled in their metadata and never show real people or events
   photorealistically.
@@ -72,7 +74,7 @@ Who signs off the final text is set per site, and each of the client's own categ
 | Mode | Final text approved by | Requirements | Readers are told |
 |---|---|---|---|
 | `human` (**default** for every new site) | a person, with a checklist (facts, quotes, images, sources) | none | `human_reviewed` |
-| `auto` (opt-in) | the system | a person approved the **lead** (for example with a Slack button), and **every automated check passed** (quality gate, information gain, image licences, source credits, caps) | `not_human_reviewed` |
+| `auto` (opt-in) | the system | a person approved the **lead** (for example with a Slack button), and **every automated check passed** (quality gate, information gain, image licences, source credits) | `not_human_reviewed` |
 
 - A category can be `human`, `auto`, or follow the site. A routine category can auto-publish while others still
   need an editor.

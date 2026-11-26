@@ -35,3 +35,13 @@ def test_cli_new_master_key(capsys):
     assert main(["secret", "new-master-key"]) == 0
     key = capsys.readouterr().out.strip()
     assert len(base64.urlsafe_b64decode(key + "=" * (-len(key) % 4))) == 32
+
+
+def test_cli_settings_list_shows_help_and_no_limits_by_default():
+    from newspilot import settings_registry
+    from newspilot.cli import render_settings
+    from newspilot.settings import SettingView
+
+    out = render_settings([SettingView(d, d.default, False) for d in settings_registry.REGISTRY.values()])
+    assert "PUBLISHING PACE" in out and "Google" in out
+    assert out.count("current: not set (no limit)") == len(settings_registry.by_group()["publishing"])
